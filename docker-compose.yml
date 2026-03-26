@@ -5,6 +5,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    pull_policy: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -35,6 +36,7 @@ services:
   # ---------------------------------------------------------------------------
   identity-provider:
     image: ${DOCKERHUB_ORG}/hdt-identity-provider:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8005"
@@ -55,6 +57,7 @@ services:
   # ---------------------------------------------------------------------------
   api-gateway:
     image: ${DOCKERHUB_ORG}/hdt-api-gateway:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8000"
@@ -81,6 +84,7 @@ services:
   # ---------------------------------------------------------------------------
   image-processing:
     image: ${DOCKERHUB_ORG}/hdt-image-processing:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8001"
@@ -105,6 +109,7 @@ services:
   # ---------------------------------------------------------------------------
   hipa-converter:
     image: xprikryl/hipa-converter:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       - api-gateway
@@ -125,6 +130,7 @@ services:
   # ---------------------------------------------------------------------------
   ai-prediction:
     image: ${DOCKERHUB_ORG}/hdt-ai-prediction:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8002"
@@ -141,6 +147,7 @@ services:
 
   ai-prediction-worker:
     image: ${DOCKERHUB_ORG}/hdt-ai-prediction-worker:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/hdt_ai_prediction
@@ -156,6 +163,7 @@ services:
   # ---------------------------------------------------------------------------
   ai-agent:
     image: ${DOCKERHUB_ORG}/hdt-ai-agent:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8003"
@@ -174,6 +182,7 @@ services:
   # ---------------------------------------------------------------------------
   behavioral-monitoring:
     image: ${DOCKERHUB_ORG}/hdt-behavioral-monitoring:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8004"
@@ -190,6 +199,7 @@ services:
   # ---------------------------------------------------------------------------
   active-learning:
     image: ${DOCKERHUB_ORG}/hdt-active-learning:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PORT: "8006"
@@ -201,6 +211,7 @@ services:
   # ---------------------------------------------------------------------------
   web-fe:
     image: ${DOCKERHUB_ORG}/hdt-web-fe:${TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       NUXT_PUBLIC_API_BASE: http://api-gateway:8000
