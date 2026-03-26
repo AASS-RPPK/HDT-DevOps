@@ -92,12 +92,33 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       MAX_UPLOAD_SIZE_BYTES: "5368709120"
     volumes:
-      - image_data:/data/input
+      - converter_input_data:/data/input
+      - converter_output_data:/data/output
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "8001:8001"
+
+  # ---------------------------------------------------------------------------
+  # HIPA Converter
+  # ---------------------------------------------------------------------------
+  hipa-converter:
+    image: xprikryl/hipa-converter:latest
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+      - image-processing
+    environment:
+      # Poll conversion jobs through API Gateway.
+      API_BASE_URL: http://api-gateway:8000
+      API_USERNAME: ${CONVERTER_USERNAME:-conversion_user}
+      API_PASSWORD: ${CONVERTER_PASSWORD:-change_me}
+      POLLING_INTERVAL_SECONDS: ${HIPA_POLLING_INTERVAL_SECONDS:-30}
+    volumes:
+      # Shared input/output directories with image-processing.
+      - converter_input_data:/data/input
+      - converter_output_data:/data/output
 
   # ---------------------------------------------------------------------------
   # AI Prediction (API + Celery Worker)
@@ -190,4 +211,5 @@ services:
 
 volumes:
   postgres_data:
-  image_data:
+  converter_input_data:
+  converter_output_data:
