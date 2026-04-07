@@ -207,6 +207,50 @@ services:
       - "8006:8006"
 
   # ---------------------------------------------------------------------------
+  # Camunda 7 BPM Platform (Run distribution — embedded H2, auto-deploys BPMN)
+  # REST API: http://localhost:8080/engine-rest
+  # Cockpit / Tasklist: http://localhost:8080   (demo / demo)
+  # ---------------------------------------------------------------------------
+  camunda:
+    image: camunda/camunda-bpm-platform:run-7.22.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # BPMN file is auto-deployed from this directory on startup
+      - ../HDT-BPMN-Worker/process.bpmn:/camunda/configuration/resources/process.bpmn:ro
+    environment:
+      # Allow cross-origin calls from the Electron desktop app
+      CAMUNDA_BPM_RUN_CORS_ENABLED: "true"
+      CAMUNDA_BPM_RUN_CORS_ALLOWED_ORIGINS: "*"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/engine-rest/engine || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # BPMN External-Task Worker
+  # Handles all service tasks in the ai_feedback_workflow process.
+  # ---------------------------------------------------------------------------
+  bpmn-worker:
+    image: ${DOCKERHUB_ORG}/hdt-bpmn-worker:${TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      CAMUNDA_URL: http://camunda:8080/engine-rest
+      AI_AGENT_URL: http://ai-agent:8003
+      ACTIVE_LEARNING_URL: http://active-learning:8006
+    depends_on:
+      camunda:
+        condition: service_healthy
+      ai-agent:
+        condition: service_started
+      active-learning:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
   # Web Frontend
   # ---------------------------------------------------------------------------
   web-fe:
