@@ -32,6 +32,34 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
+  # Apache Kafka (KRaft mode — no ZooKeeper required)
+  # Internal broker: kafka:9092
+  # External access (host): localhost:29092
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: bitnami/kafka:3.7
+    restart: unless-stopped
+    pull_policy: always
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,EXTERNAL://:29092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
   # Identity Provider
   # ---------------------------------------------------------------------------
   identity-provider:
@@ -67,6 +95,7 @@ services:
       BEHAVIORAL_MONITORING_URL: http://behavioral-monitoring:8004
       IDENTITY_PROVIDER_URL: http://identity-provider:8005
       ACTIVE_LEARNING_URL: http://active-learning:8006
+      WORKFLOW_SERVICE_URL: http://kafka-worker:8007
       PROXY_TIMEOUT: "60.0"
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     depends_on:
@@ -76,6 +105,7 @@ services:
       - ai-agent
       - behavioral-monitoring
       - active-learning
+      - kafka-worker
     ports:
       - "8000:8000"
 
@@ -115,13 +145,11 @@ services:
       - api-gateway
       - image-processing
     environment:
-      # Poll conversion jobs through API Gateway.
       API_BASE_URL: http://api-gateway:8000
       API_USERNAME: ${CONVERTER_USERNAME:-conversion_user}
       API_PASSWORD: ${CONVERTER_PASSWORD:-change_me}
       POLLING_INTERVAL_SECONDS: ${HIPA_POLLING_INTERVAL_SECONDS:-30}
     volumes:
-      # Shared input/output directories with image-processing.
       - converter_input_data:/data/input
       - converter_output_data:/data/output
 
@@ -136,11 +164,14 @@ services:
       PORT: "8002"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/hdt_ai_prediction
       REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
     ports:
       - "8002:8002"
@@ -159,7 +190,7 @@ services:
         condition: service_healthy
 
   # ---------------------------------------------------------------------------
-  # AI Agent
+  # AI Agent (Gemini chatbot + Kafka consumer for workflow service tasks)
   # ---------------------------------------------------------------------------
   ai-agent:
     image: ${DOCKERHUB_ORG}/hdt-ai-agent:${TAG:-latest}
@@ -170,9 +201,12 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/hdt_ai_agent
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     depends_on:
       postgres:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
     ports:
       - "8003:8003"
@@ -195,7 +229,7 @@ services:
       - "8004:8004"
 
   # ---------------------------------------------------------------------------
-  # Active Learning
+  # Active Learning (feedback queue + Kafka consumers for workflow service tasks)
   # ---------------------------------------------------------------------------
   active-learning:
     image: ${DOCKERHUB_ORG}/hdt-active-learning:${TAG:-latest}
@@ -203,52 +237,33 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8006"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
     ports:
       - "8006:8006"
 
   # ---------------------------------------------------------------------------
-  # Camunda 7 BPM Platform (Run distribution — embedded H2, auto-deploys BPMN)
-  # REST API: http://localhost:8080/engine-rest
-  # Cockpit / Tasklist: http://localhost:8080   (demo / demo)
+  # Feedback Workflow Producer (Kafka-based)
+  # Exposes POST /chatbotTask, /chatbotTask/status, /feedbackTask, /feedbackTask/status
+  # via API Gateway. Stores task status in Redis.
   # ---------------------------------------------------------------------------
-  camunda:
-    image: camunda/camunda-bpm-platform:run-7.22.0
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      # BPMN file is auto-deployed from this directory on startup
-      - ../HDT-BPMN-Worker/process.bpmn:/camunda/configuration/resources/process.bpmn:ro
-    environment:
-      # Allow cross-origin calls from the Electron desktop app
-      CAMUNDA_BPM_RUN_CORS_ENABLED: "true"
-      CAMUNDA_BPM_RUN_CORS_ALLOWED_ORIGINS: "*"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:8080/engine-rest/engine || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  # ---------------------------------------------------------------------------
-  # BPMN External-Task Worker
-  # Handles all service tasks in the ai_feedback_workflow process.
-  # ---------------------------------------------------------------------------
-  bpmn-worker:
-    image: ${DOCKERHUB_ORG}/hdt-bpmn-worker:${TAG:-latest}
+  kafka-worker:
+    image: ${DOCKERHUB_ORG}/hdt-kafka-worker:${TAG:-latest}
     pull_policy: always
     restart: unless-stopped
     environment:
-      CAMUNDA_URL: http://camunda:8080/engine-rest
-      AI_AGENT_URL: http://ai-agent:8003
-      ACTIVE_LEARNING_URL: http://active-learning:8006
+      PORT: "8007"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_URL: redis://redis:6379/0
     depends_on:
-      camunda:
+      kafka:
         condition: service_healthy
-      ai-agent:
-        condition: service_started
-      active-learning:
-        condition: service_started
+      redis:
+        condition: service_healthy
+    ports:
+      - "8007:8007"
 
   # ---------------------------------------------------------------------------
   # Web Frontend
@@ -258,7 +273,6 @@ services:
     pull_policy: always
     restart: unless-stopped
     environment:
-      # Browser clients must call the host-mapped gateway port, not Docker DNS.
       NUXT_PUBLIC_API_BASE: http://localhost:8000
     depends_on:
       - api-gateway
