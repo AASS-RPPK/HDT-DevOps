@@ -37,7 +37,7 @@ services:
   # External access (host): localhost:29092
   # ---------------------------------------------------------------------------
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7
     restart: unless-stopped
     pull_policy: always
     environment:
